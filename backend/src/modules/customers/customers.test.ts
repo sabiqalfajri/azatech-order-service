@@ -1,45 +1,42 @@
-import { randomUUID } from "node:crypto";
 import { like } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../../app.js";
 import { customers } from "../../db/schema/customers.js";
+import { createTestData } from "../../test/helpers/test-data.js";
+import { bearer, loginAsAdmin } from "../../test/helpers/auth.js";
 
-const LOGIN_URL = "/api/auth/login";
-const ADMIN = { email: "admin@example.com", password: "Admin123!" };
-
-const RUN = randomUUID().slice(0, 8).toUpperCase();
-const PREFIX = `TST-${RUN}`;
-let seq = 0;
-const nextName = () => `${PREFIX} Pelanggan ${++seq}`;
+const testData = createTestData("CUSTOMER")
 
 describe("Customers API", () => {
   let app: FastifyInstance;
   let accessToken: string;
 
-  const headers = () => ({ authorization: `Bearer ${accessToken}` });
+  const headers = () => bearer(accessToken);
 
   const createCustomer = (payload: Record<string, unknown> = {}) =>
     app.inject({
       method: "POST",
       url: "/api/customers",
       headers: headers(),
-      payload: { name: nextName(), ...payload },
+      payload: {
+        name: testData.name("Pelanggan"),
+        ...payload,
+      },
     });
 
   beforeAll(async () => {
     app = await buildApp();
     await app.ready();
 
-    const login = await app.inject({ method: "POST", url: LOGIN_URL, payload: ADMIN });
-    expect(login.statusCode).toBe(200);
-    const body = login.json<{ data: { access_token: string } }>();
-    expect(body.data.access_token).toBeTruthy();
-    accessToken = body.data.access_token;
+    accessToken = await loginAsAdmin(app);
   });
 
   afterAll(async () => {
-    await app.db.delete(customers).where(like(customers.name, `${PREFIX}%`));
+    await app.db
+      .delete(customers)
+      .where(like(customers.name, `${testData.prefix}%`));
+
     await app.close();
   });
 
@@ -67,7 +64,7 @@ describe("Customers API", () => {
   });
 
   it("membuat pelanggan lengkap (201), tanggal berupa string ISO", async () => {
-    const name = nextName();
+    const name = testData.name("Pelanggan");
     const res = await createCustomer({ name, email: "tes@example.com", phone: "081234567890" });
 
     expect(res.statusCode).toBe(201);
@@ -95,8 +92,10 @@ describe("Customers API", () => {
   });
 
   it("search mengembalikan hanya pelanggan yang cocok", async () => {
-    const needle = `needle${RUN.toLowerCase()}`;
-    const created = await createCustomer({ name: `${PREFIX} ${needle}` });
+    const needle = `needle${testData.run.toLowerCase()}`;
+    const created = await createCustomer({
+      name: `${testData.prefix} ${needle}`,
+    });
     expect(created.statusCode).toBe(201);
 
     const res = await app.inject({

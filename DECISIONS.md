@@ -87,6 +87,34 @@ Plugin bertanggung jawab untuk:
 
 Dengan pendekatan ini, koneksi database tidak dibuat ulang untuk setiap request.
 
+### Autentikasi di Frontend: BFF dengan Cookie httpOnly
+
+Backend memakai JWT (Bearer token) sesuai soal. Pertanyaannya adalah di mana frontend menyimpan token itu. Ada tiga opsi yang saya pertimbangkan:
+
+1. **localStorage atau cookie biasa yang diatur dari JavaScript.** Paling sederhana, tetapi token bisa dibaca JavaScript, sehingga satu celah XSS cukup untuk mencuri sesi. localStorage juga tidak terbaca di server, sehingga proteksi route hanya bisa dilakukan setelah halaman termuat.
+2. **RS256 dengan JWKS.** Ini mengubah siapa yang dapat memverifikasi token, tetapi token tetap bisa dibaca JavaScript, jadi tidak menyelesaikan masalah XSS. Manfaatnya baru terasa ketika ada banyak service yang memverifikasi token, dan itu belum terjadi di sini.
+3. **BFF (Backend for Frontend) dengan cookie httpOnly.** Opsi ini yang dipilih.
+
+Cara kerjanya:
+
+- `POST /api/auth/login` di Next (`frontend/src/app/api/auth/login/route.ts`) meneruskan kredensial ke backend, menyimpan `access_token` di cookie httpOnly, dan menghapus token dari respons, sehingga token tidak pernah sampai ke JavaScript browser.
+- Endpoint lain melewati `frontend/src/app/api/[...path]/route.ts`, yang membaca cookie dan meneruskan request ke backend dengan header `Authorization: Bearer`. Jika backend menjawab 401, cookie dihapus dan `api-client.ts` mengarahkan pengguna ke `/login`.
+- `frontend/src/proxy.ts` menolak akses ke halaman tanpa cookie sebelum halaman dirender.
+- Umur cookie diambil dari klaim `exp` pada JWT (`lib/auth-cookie.ts`), sehingga tidak perlu disamakan secara manual dengan masa berlaku token di backend.
+
+Dampak lainnya: browser hanya berkomunikasi dengan origin Next, jadi CORS tidak diperlukan. Alamat backend (`BACKEND_URL`) dibaca server saat runtime dan tidak tertanam di bundle, sehingga mudah diubah di Docker. Backend tidak berubah dan tetap menjadi REST API berbasis JWT standar.
+
+Trade-off yang diterima: ada satu hop jaringan tambahan, perlindungan CSRF hanya mengandalkan `SameSite=Lax` (belum ada token CSRF), dan `proxy.ts` hanya memeriksa keberadaan cookie sedangkan keabsahan token tetap diperiksa backend pada setiap request.
+
+### Struktur Frontend
+
+Frontend memakai Next.js (App Router) dan TypeScript. Kode dikelompokkan per fitur (`src/features/<fitur>/` berisi `api.ts`, `hooks.ts`, `types.ts`, `schema.ts`, dan `components/`), sedangkan `app/` hanya berisi route dan layout, sehingga perubahan satu fitur terkumpul di satu folder.
+
+- **Data dari server** dikelola dengan TanStack Query. Pencarian dan pagination dilakukan di server, hasilnya di-cache per halaman dan kata kunci. Hasil `pay` dan `cancel` langsung ditulis ke cache detail order, dan cache produk di-invalidate ketika stok berubah.
+- **Form** memakai React Hook Form dengan Zod, dengan aturan yang sama seperti backend. Error server berkunci `items.N.quantity` dipetakan ke baris yang bersangkutan.
+- **Validasi stok tidak diblokir di client.** Form hanya menampilkan peringatan jika jumlah melebihi stok yang terlihat, tetapi tetap mengirim request, karena stok bisa berubah kapan saja dan keputusan akhir ada di server.
+- **Total di form hanyalah pratinjau** (`features/orders/calculate.ts`). Harga, diskon, dan total final selalu dihitung server, dan client tidak pernah mengirim harga.
+
 ### Authentication
 
 Autentikasi JWT diterapkan menggunakan lifecycle hook `onRequest` pada level route plugin untuk seluruh endpoint yang membutuhkan autentikasi.
@@ -178,6 +206,7 @@ Beberapa bagian yang belum diimplementasikan atau masih dapat dikembangkan lebih
 - **Refresh Token:** Autentikasi saat ini menggunakan JWT access token tanpa mekanisme refresh token. Pengembangan selanjutnya dapat menambahkan refresh token dengan rotasi token untuk memperbarui access token tanpa mengharuskan pengguna login kembali.
 - **Rate Limiting:** Endpoint login belum dilengkapi rate limiting untuk membatasi percobaan login berulang.
 - **Database Testing:** Automated test masih menggunakan database yang sama dengan environment development. Ke depannya, database khusus testing dapat digunakan agar data pengujian terisolasi dari data development.
+- **Penerbitan cookie sesi:** cookie `access_token` dibuat oleh route handler Next (`frontend/src/app/api/auth/login/route.ts`), bukan oleh backend. Umur cookie memang diambil dari klaim `exp` JWT dari backend, tetapi atribut cookie (`httpOnly`, `SameSite`, `Secure`) ditentukan di frontend. Akibatnya kebijakan sesi tersebar di dua tempat. Pendekatan yang lebih rapi adalah backend menerbitkan cookie sesi (misalnya lewat `@fastify/cookie`) dan BFF hanya meneruskan header `Set-Cookie`, sehingga backend menjadi satu-satunya sumber kebenaran. Itu tidak dilakukan karena soal mensyaratkan login mengembalikan token pada body respons, dan perubahan itu menyentuh kontrak API di backend yang sudah diuji.
 - **Observability:** Monitoring dan observability masih dapat ditingkatkan, misalnya melalui structured logging, metrics, dan monitoring performa query.
 
 ## 5. Additional Technical Decisions
