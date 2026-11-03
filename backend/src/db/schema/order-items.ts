@@ -5,7 +5,8 @@ import {
   timestamp,
   uuid,
   check,
-  index
+  index,
+  unique
 } from "drizzle-orm/pg-core";
 import { orders } from "./orders.js";
 import { products } from "./products.js";
@@ -31,6 +32,10 @@ export const orderItems = pgTable("order_items", {
   check("order_items_subtotal_check", sql`${table.subtotal} = ${table.unitPrice} * ${table.quantity}`),
   index("order_items_order_id_idx").on(table.orderId),
   index("order_items_product_id_idx").on(table.productId),
+  unique("order_items_order_product_uq").on(
+    table.orderId,
+    table.productId,
+  ),
 ])
 
 export type OrderItemRow = typeof orderItems.$inferSelect;

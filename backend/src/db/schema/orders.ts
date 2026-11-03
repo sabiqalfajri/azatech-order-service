@@ -4,6 +4,7 @@ import {
   integer,
   pgEnum,
   pgTable,
+  pgSequence,
   text,
   timestamp,
   uuid,
@@ -47,4 +48,5 @@ export const orders = pgTable("orders", {
   index("orders_created_at_idx").on(table.createdAt),
 ])
 
+export const orderNumberSeq = pgSequence("order_number_seq");
 export type OrderRow = typeof orders.$inferSelect
