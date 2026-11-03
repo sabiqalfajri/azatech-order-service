@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Build outputs
+dist/
+build/
+.output/
+.next/
+out/
+
+# Framework / tooling cache
+.cache/
+.turbo/
+.vercel/
+
+# Testing
+coverage/
+
+# Environment variables
+.env*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Misc
+.DS_Store
+Thumbs.db
+*.pem
+
+# IDE
+.idea/
+.vscode/
