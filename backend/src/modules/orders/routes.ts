@@ -1,11 +1,9 @@
-
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import {
   withDefaultResponses,
   withPaginatedResponse,
 } from "../../common/schemas/response.js";
-
 import { createOrderController } from "./controller.js";
 import { createOrderService } from "./service.js";
 import {
@@ -23,7 +21,6 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
   const orderService = createOrderService({
     db: app.db,
   })
-
   const controller = createOrderController({
     orderService,
   })

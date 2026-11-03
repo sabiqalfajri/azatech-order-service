@@ -1,27 +1,21 @@
 import { and, asc, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { AppError, type FieldErrors } from "../../common/errors/app-error.js";
 import { customers } from "../../db/schema/customers.js";
-import { orderItems } from "../../db/schema/order-items.js";
-import { orders } from "../../db/schema/orders.js";
+import { orderItems, type OrderItemRow } from "../../db/schema/order-items.js";
+import { orders, type OrderRow } from "../../db/schema/orders.js";
 import { products } from "../../db/schema/products.js";
 import type { DB, TX } from "../../db/types.js";
 import { calculateOrder } from "./helpers/calculate-order.js";
 import { formatOrderNumber } from "./helpers/generate-invoice.js";
 import type { CreateOrderInput, GetOrdersQuery } from "./schema.js";
+import { NotFoundError } from "../../common/errors/sub-error.js";
+import { startOfDay, startOfNextDay } from "./helpers/date-range.js";
 
-type OrderRow = typeof orders.$inferSelect;
-type ItemRow = typeof orderItems.$inferSelect;
 type CustomerRef = { id: string; name: string };
-
-const DAY_MS = 86_400_000;
-const startOfDay = (d: string) => new Date(`${d}T00:00:00+07:00`);
-const startOfNextDay = (d: string) => new Date(startOfDay(d).getTime() + DAY_MS);
-
-const notFound = () => new AppError("Order tidak ditemukan", 404);
 
 export function toOrderResponse(
   o: OrderRow,
-  extra: { items?: ItemRow[]; customer?: CustomerRef } = {}
+  extra: { items?: OrderItemRow[]; customer?: CustomerRef } = {}
 ) {
   return {
     id: o.id,
@@ -57,7 +51,7 @@ export function createOrderService({ db }: OrderServiceDeps) {
       .innerJoin(customers, eq(customers.id, orders.customerId))
       .where(eq(orders.id, id))
       .limit(1);
-    if (!row) throw notFound();
+    if (!row) throw new NotFoundError("Order tidak ditemukan");
 
     const items = await db
       .select()
@@ -79,7 +73,7 @@ export function createOrderService({ db }: OrderServiceDeps) {
       .where(eq(orders.id, id))
       .limit(1);
 
-    if (!existing) return notFound();
+    if (!existing) throw new NotFoundError("Order tidak ditemukan");
     
     return new AppError(
       `Order berstatus ${existing.status} tidak dapat diubah menjadi ${target}`,
