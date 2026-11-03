@@ -3,7 +3,6 @@ import { eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../../app.js";
-// import { db } from "../../db/client.js";
 import { customers } from "../../db/schema/customers.js";
 import { orders } from "../../db/schema/orders.js";
 import { products } from "../../db/schema/products.js";

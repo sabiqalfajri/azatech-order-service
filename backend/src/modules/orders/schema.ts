@@ -67,3 +67,4 @@ export const orderSchema = z.object({
 
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 export type GetOrdersQuery = z.infer<typeof getOrdersQuerySchema>;
+export type OrderIdParams = z.infer<typeof orderIdParamSchema>;
