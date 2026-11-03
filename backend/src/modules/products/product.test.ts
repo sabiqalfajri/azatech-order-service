@@ -3,7 +3,6 @@ import { like } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../../app.js";
-// import { db } from "../../db/client.js";
 import { products } from "../../db/schema/products.js";
 
 const LOGIN_URL = "/api/auth/login";

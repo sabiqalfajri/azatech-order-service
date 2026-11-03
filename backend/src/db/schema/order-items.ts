@@ -32,3 +32,5 @@ export const orderItems = pgTable("order_items", {
   index("order_items_order_id_idx").on(table.orderId),
   index("order_items_product_id_idx").on(table.productId),
 ])
+
+export type OrderItemRow = typeof orderItems.$inferSelect;

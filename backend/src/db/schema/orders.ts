@@ -46,3 +46,5 @@ export const orders = pgTable("orders", {
   index("orders_status_idx").on(table.status),
   index("orders_created_at_idx").on(table.createdAt),
 ])
+
+export type OrderRow = typeof orders.$inferSelect
