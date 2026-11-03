@@ -10,13 +10,15 @@ Seluruh nilai yang berkaitan dengan transaksi, seperti harga produk, harga satua
 
 ## 2. Stock Concurrency & Transaction Integrity
 
-*Bagian ini akan dilengkapi setelah implementasi proses pembuatan dan pembatalan pesanan.*
+**Mencegah stok minus saat order bersamaan.** Di `createOrder` (`src/modules/orders/service.ts`), seluruh proses berjalan dalam satu `db.transaction`. Di awal transaksi, baris semua produk dalam order dikunci dengan `SELECT ... FOR UPDATE`. Order kedua untuk produk yang sama menunggu sampai order pertama commit atau rollback, lalu membaca stok terbaru, sehingga dua order tidak bisa "menjual" stok yang sama. Produk dikunci dalam urutan `id` yang tetap supaya dua transaksi dengan urutan produk berbeda tidak saling menunggu (deadlock).
 
-Hal-hal yang akan dijelaskan:
-- Bagaimana mencegah stok menjadi negatif ketika beberapa pesanan dibuat secara bersamaan.
-- Bagaimana memastikan validasi stok dan pengurangan stok berlangsung secara atomik.
-- Bagaimana memastikan kegagalan pada salah satu item tidak menyebabkan perubahan stok sebagian.
-- Bagaimana proses pembatalan mengembalikan stok secara konsisten.
+**Atomik dan tanpa perubahan sebagian.** Semua item divalidasi setelah baris dikunci dan sebelum ada data yang ditulis. Jika satu item gagal, error dilempar sebelum insert pertama, sehingga stok semua item tidak berubah. Jika ada kegagalan di tengah (misalnya insert), rollback membatalkan semuanya.
+
+**Pembatalan.** `cancelOrder` memakai satu `UPDATE ... WHERE status IN ('PENDING','PAID')` dalam transaksi yang sama dengan pengembalian stok. Dua pembatalan bersamaan tidak bisa mengembalikan stok dua kali: yang kedua menunggu row lock, melihat status sudah `CANCELLED`, tidak mengenai baris, dan dijawab 409. `payOrder` memakai pola yang sama.
+
+**Lapisan terakhir.** Constraint `products_stock_check` (`stock >= 0`) di database menolak stok minus walaupun ada bug di service. Test `stok tidak minus saat banyak order masuk bersamaan` (`orders.test.ts`) mengirim 8 order serentak untuk stok 3 dan memeriksa tepat 3 yang berhasil dan stok akhir 0.
+
+**Status code.** Stok tidak cukup dijawab 409 karena merupakan konflik dengan kondisi data saat ini, sedangkan payload yang cacat (produk tidak ada, duplikat, quantity salah) dijawab 422. Keduanya tetap membawa `errors` per item.
 
 ## 3. Project Structure & Architecture
 
@@ -106,7 +108,7 @@ Beberapa pertimbangan desain:
 - `orders` menyimpan informasi utama transaksi, termasuk status, subtotal, diskon, dan total akhir.
 - `order_items` menyimpan snapshot nama produk, kode produk, dan harga satuan ketika pesanan dibuat. Dengan demikian, perubahan informasi produk tidak mengubah histori transaksi yang sudah tercatat.
 - Satu produk hanya boleh muncul sekali dalam satu order. Aturan ini dijaga di dua lapisan:
-  1. **Validasi aplikasi**: `superRefine` pada schema Zod `createOrderSchema` (`src/modules/orders/order.schema.ts`) menolak item dengan `productId` duplikat dan mengembalikan HTTP 422 dengan error pada `items.N.productId`, sehingga pesan error jelas dan sesuai indeks item di request.
+  1. **Validasi aplikasi**: `superRefine` pada schema Zod `createOrderSchema` (`src/modules/orders/schema.ts`) menolak item dengan `product_id` duplikat dan mengembalikan HTTP 422 dengan error pada `items.N.productId`, sehingga pesan error jelas dan sesuai indeks item di request.
   2. **Constraint database**: unique constraint `order_items_order_product_uq` pada `(order_id, product_id)` di tabel `order_items`, sebagai jaring pengaman jika ada bug di service atau jalur lain yang menulis ke tabel ini.
   
   Alternatif menggabungkan item duplikat di service (misalnya produk A qty 2 dan qty 3 menjadi qty 5) tidak dipilih. Penggabungan memang membuat API lebih toleran, tetapi membuat pemetaan error menjadi ambigu. Contohnya, jika stok produk A tersisa 4 dan request berisi dua baris A dengan total 5, error stok tidak jelas harus ditempelkan ke baris yang mana. Solusinya adalah memilih salah satu baris (misalnya baris pertama) dan memberi pesan "gabungan 2 baris", tetapi itu menambah logika pemetaan yang harus dijaga, dan user melihat error pada baris yang jumlahnya sendiri sebenarnya tidak melebihi stok. Dengan menolak duplikat (422), setiap error selalu menunjuk tepat satu item di request, sesuai format error `items.N.quantity` pada soal.
@@ -121,9 +123,8 @@ Akan mencakup bug yang ditemukan, penyebabnya, serta solusi yang diterapkan.
 
 ## 6. Limitations & Future Improvements
 
-*Bagian ini akan diperbarui setelah seluruh requirement utama selesai diimplementasikan.*
-
-Akan mencakup:
-- Bagian yang belum selesai atau masih memiliki keterbatasan.
-- Area implementasi yang masih dapat ditingkatkan.
-- Pertimbangan pengembangan lebih lanjut.
+- Nomor order memakai sequence global tanpa reset harian, dan menjadi lebih dari 4 digit setelah 9999 order. Alternatif: counter per hari.
+- Idempotency-Key pada `POST /api/orders` belum diimplementasikan.
+- Produk duplikat dalam satu order ditolak, belum digabung.
+- Login tidak ada rate limiting dan waktu respons berbeda untuk email yang tidak terdaftar.
+- Test dijalankan terhadap database yang sama dengan development, belum ada database test terpisah.

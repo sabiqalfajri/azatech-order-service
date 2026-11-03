@@ -59,8 +59,8 @@ export const orderSchema = z.object({
   subtotal: z.number().int(),
   discount_amount: z.number().int(),
   grand_total: z.number().int(),
-  created_at: z.date(),
-  updated_at: z.date(),
+  created_at: z.iso.datetime(),
+  updated_at: z.iso.datetime(),
   customer: z.object({ id: z.uuid(), name: z.string() }).optional(),
   items: z.array(orderItemResponseSchema).optional(),
 });

@@ -21,27 +21,37 @@ Aplikasi ini menyediakan pengelolaan produk, pelanggan, dan pesanan, termasuk pr
 
 ### Infrastructure & Testing
 - Docker & Docker Compose
-- Vitest / Jest
-- Supertest
+- Vitest
+- Fastify Inject (HTTP integration testing)
 
 ## Fitur
 
-- Autentikasi admin menggunakan JWT.
-- Pengelolaan produk, termasuk pencarian dan pagination.
-- Pengelolaan data pelanggan.
-- Pembuatan pesanan dengan satu atau lebih produk.
-- Perhitungan subtotal, diskon, dan total pesanan di sisi backend.
-- Pengelolaan status pesanan: PENDING, PAID, dan CANCELLED.
-- Pengurangan stok ketika pesanan dibuat.
-- Pengembalian stok ketika pesanan dibatalkan.
-- Riwayat dan detail pesanan.
+- Login admin dengan JWT; semua endpoint selain login memerlukan token.
+- Produk: daftar dengan pagination dan pencarian nama/kode, tambah, dan ubah.
+- Pelanggan: daftar dan tambah.
+- Order: satu atau lebih produk; harga, subtotal, diskon, dan total dihitung di server.
+- Diskon bertingkat (Varian A) dengan batas maksimal; angka order tidak berubah walau harga produk diubah kemudian.
+- Status order PENDING, PAID, dan CANCELLED; transisi tidak valid ditolak dengan 409.
+- Stok berkurang saat order dibuat dan dikembalikan saat order dibatalkan, tanpa risiko stok minus pada order bersamaan.
+- Riwayat order dengan filter status dan rentang tanggal, serta detail order beserta item.
+
+## Struktur Repository
+
+```
+.
+├── backend/              # REST API (Fastify + Drizzle)
+├── frontend/             # Next.js
+├── docker-compose.yaml
+├── README.md
+├── DECISIONS.md
+└── AI_USAGE.md
+```
 
 ## Persyaratan
 
 Pastikan perangkat sudah memiliki:
 - Git
-- Docker
-- Docker Compose
+- Docker dan Docker Compose
 - Node.js dan npm
 
 ## Menjalankan Aplikasi
@@ -49,8 +59,8 @@ Pastikan perangkat sudah memiliki:
 ### 1. Clone Repository
 
 ```bash
-git clone <repository-url>
-cd fullstack-order-service
+git clone https://github.com/sabiqalfajri/azatech-order-service.git
+cd azatech-order-service
 ```
 
 ### 2. Konfigurasi Environment
@@ -127,58 +137,111 @@ Akun berikut disediakan untuk keperluan pengujian:
 | Field | Value |
 |---|---|
 | Email | `admin@example.com` |
-| Password | `<seeded-admin-password>` |
+| Password | `Admin123!` |
 
 ## Database
 
-Database menggunakan PostgreSQL dengan Drizzle ORM sebagai ORM dan migration tool.
+PostgreSQL dengan Drizzle ORM. Migrasi ada di `backend/drizzle/` dan dijalankan
+dengan `npm run db:migrate`; `npm run db:seed` mengisi data awal (idempotent,
+aman dijalankan berulang):
 
-Database dijalankan melalui Docker Compose, sedangkan migration dan seeding dilakukan menggunakan script yang tersedia di backend.
-
-Data awal yang disediakan:
-- 1 akun admin.
-- Minimal 15 produk.
-- 10 pelanggan.
-
-## Alur Pembuatan Pesanan
-
-Endpoint `POST /orders` menangani pembuatan pesanan dengan alur berikut:
-
-1. Memvalidasi data pesanan dan memastikan produk yang diminta tersedia.
-2. Mengambil harga produk langsung dari database, bukan mempercayai harga yang dikirim oleh client.
-3. Memvalidasi ketersediaan stok untuk seluruh item pesanan.
-4. Menghitung subtotal, diskon, dan total akhir di backend.
-5. Menyimpan pesanan beserta item dan snapshot informasi produk.
-6. Mengurangi stok produk dalam satu database transaction.
-
-Jika salah satu produk memiliki stok yang tidak mencukupi, seluruh proses dibatalkan sehingga tidak terjadi perubahan stok sebagian.
+- 1 akun admin
+- 15 produk
+- 10 pelanggan
 
 ## API
 
-Backend menyediakan REST API untuk:
-- Autentikasi
-- Produk
-- Pelanggan
-- Pesanan
+Semua endpoint selain login memerlukan header `Authorization: Bearer <access_token>`.
 
-Dokumentasi endpoint, parameter, dan contoh request tersedia melalui dokumentasi API jika Swagger/OpenAPI telah diimplementasikan.
+| Method | Endpoint | Keterangan |
+|---|---|---|
+| POST | `/api/auth/login` | Login, mengembalikan token |
+| GET | `/api/products` | Daftar produk (`page`, `per_page`, `search`) |
+| POST | `/api/products` | Buat produk |
+| PUT | `/api/products/{id}` | Perbarui produk |
+| GET | `/api/customers` | Daftar pelanggan |
+| POST | `/api/customers` | Buat pelanggan |
+| POST | `/api/orders` | Buat order |
+| GET | `/api/orders` | Riwayat order (`status`, `date_from`, `date_to`, `page`, `per_page`) |
+| GET | `/api/orders/{id}` | Detail order beserta item |
+| PATCH | `/api/orders/{id}/pay` | PENDING → PAID |
+| PATCH | `/api/orders/{id}/cancel` | PENDING atau PAID → CANCELLED, stok dikembalikan |
+
+Nama field JSON memakai snake_case (`product_code`, `per_page`, `discount_amount`) sesuai contoh di soal.
+
+Response sukses:
+
+```json
+{ "success": true, "message": "OK", "data": {}, "meta": { "page": 1, "per_page": 10, "total": 57 } }
+```
+
+`meta` hanya ada pada endpoint daftar. Response gagal:
+
+```json
+{
+  "success": false,
+  "message": "Stok tidak mencukupi",
+  "errors": { "items.1.quantity": ["Stok Hydrococo 150ml tersisa 3, diminta 5"] }
+}
+```
+
+Status code yang dipakai: 200, 201, 401 (token tidak ada atau tidak valid), 404, 409 (transisi status tidak valid, stok tidak mencukupi, kode produk duplikat), dan 422 (validasi).
+
+Contoh request order (harga dan total tidak dikirim oleh client):
+
+```json
+{
+  "customer_id": "<uuid pelanggan>",
+  "items": [
+    { "product_id": "<uuid produk>", "quantity": 2 }
+  ]
+}
+```
+
+## Aturan Diskon (Varian A)
+
+| Subtotal order | Diskon |
+|---|---|
+| Rp 500.000 ke atas | 5% |
+| Rp 1.000.000 ke atas | 10% |
+
+Diskon dibatasi maksimal Rp 150.000 dan dibulatkan ke bawah. Order menyimpan `subtotal`, `discount_amount`, dan `grand_total`, serta snapshot nama, kode, dan harga satuan tiap item.
+
+## Alur `POST /api/orders`
+
+1. **Route** (`backend/src/modules/orders/routes.ts`): hook `onRequest` memverifikasi JWT. Tanpa token atau dengan token salah, request ditolak 401 sebelum validasi apa pun.
+2. **Validasi**: body diperiksa oleh `createOrderSchema` (Zod): `customer_id` UUID, minimal satu item, quantity bilangan bulat minimal 1, dan tidak ada produk duplikat. Gagal menghasilkan 422 dengan `errors` per field, misalnya `items.1.quantity`. Field harga atau total dari client tidak dikenali dan dibuang.
+3. **Controller** mengambil id user dari token dan memanggil `orderService.createOrder`.
+4. **Service** (`createOrder` di `service.ts`) menjalankan satu `db.transaction`:
+   1. memeriksa pelanggan ada;
+   2. mengunci baris produk dengan `SELECT ... FOR UPDATE`, diurutkan menurut `id`;
+   3. memeriksa semua item (produk ada dan stok cukup). Jika ada yang gagal, seluruh order ditolak dan belum ada data yang berubah;
+   4. menghitung subtotal, diskon, dan grand total dari harga di database (`helpers/calculate-order.ts`);
+   5. membuat nomor `INV-YYYYMMDD-XXXX` dari sequence Postgres (`helpers/generate-invoice.ts`);
+   6. menyimpan `orders` dan `order_items`, lalu mengurangi stok.
+5. Setelah commit, order dimuat ulang beserta item dan pelanggan, lalu dikirim sebagai 201.
+
+Error di langkah mana pun dilempar sebagai `AppError`, transaksi di-rollback, dan `errorHandlerPlugin` mengubahnya menjadi format `{ success: false, message, errors }`.
 
 ## Pengujian
 
-Automated tests mencakup skenario utama, termasuk:
-- Pembuatan pesanan berhasil.
-- Penanganan stok tidak mencukupi.
-- Pengembalian stok ketika pesanan dibatalkan.
-- Penolakan transisi status pesanan yang tidak valid.
-- Validasi aturan bisnis pada varian yang dipilih.
-- Penolakan akses tanpa autentikasi.
-
-Jalankan automated tests dari direktori backend:
+Prasyarat: database sudah berjalan, sudah di-migrate, dan sudah di-seed (lihat bagian Menjalankan Aplikasi). Test login memakai akun admin seeder dan menulis ke database yang sama. Data test memakai kode unik dan dibersihkan sendiri setelah selesai.
 
 ```bash
+cd backend
+npm install
 npm test
 ```
 
-## Catatan
+Cakupan test:
 
-Dokumentasi ini akan diperbarui mengikuti perkembangan implementasi aplikasi.
+- order sukses, dengan total dihitung server dan stok berkurang
+- stok tidak cukup (error di item yang bermasalah, stok tidak berubah)
+- pembatalan mengembalikan stok
+- transisi status tidak valid (409)
+- aturan diskon Varian A, termasuk batas tiap tingkat dan batas maksimal
+- angka order tidak berubah setelah harga produk diubah
+- produk duplikat dalam satu order ditolak
+- banyak order bersamaan tidak membuat stok minus
+- filter status dan tanggal pada riwayat order
+- akses tanpa token (401)

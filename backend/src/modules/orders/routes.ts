@@ -1,6 +1,10 @@
 
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
+import {
+  withDefaultResponses,
+  withPaginatedResponse,
+} from "../../common/schemas/response.js";
 
 import { createOrderController } from "./controller.js";
 import { createOrderService } from "./service.js";
@@ -8,14 +12,6 @@ import {
   createOrderSchema,
   getOrdersQuerySchema,
   orderIdParamSchema,
-} from "./schema.js";
-
-import {
-  withDefaultResponses,
-  withPaginatedResponse,
-} from "../../common/schemas/response.js";
-
-import {
   orderSchema,
 } from "./schema.js";
 
@@ -26,10 +22,11 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
 
   const orderService = createOrderService({
     db: app.db,
-  });
+  })
+
   const controller = createOrderController({
     orderService,
-  });
+  })
 
   route.get("/", {
     schema: {
@@ -38,7 +35,7 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       querystring: getOrdersQuerySchema,
       response: withPaginatedResponse(orderSchema),
     },
-  }, controller.getOrders);
+  }, controller.getOrders)
 
   route.get("/:id", {
     schema: {
@@ -47,16 +44,16 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       params: orderIdParamSchema,
       response: withDefaultResponses({ 200: orderSchema }),
     },
-  }, controller.getOrderById);
+  }, controller.getOrderById)
 
   route.post("/", {
     schema: {
       tags: ["Orders"],
       summary: "Create order",
-      body: orderIdParamSchema,
+      body: createOrderSchema,
       response: withDefaultResponses({ 201: orderSchema }),
     },
-  }, controller.createOrder);
+  }, controller.createOrder)
 
   route.patch("/:id/pay", {
     schema: {
@@ -65,7 +62,7 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       params: orderIdParamSchema,
       response: withDefaultResponses({ 200: orderSchema }),
     },
-  }, controller.payOrder);
+  }, controller.payOrder)
 
   route.patch("/:id/cancel", {
     schema: {
@@ -74,5 +71,5 @@ export const orderRoutes: FastifyPluginAsync = async (app) => {
       params: orderIdParamSchema,
       response: withDefaultResponses({ 200: orderSchema }),
     },
-  }, controller.cancelOrder);
+  }, controller.cancelOrder)
 };
