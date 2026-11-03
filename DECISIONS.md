@@ -62,6 +62,14 @@ Plugin bertanggung jawab untuk:
 
 Dengan pendekatan ini, koneksi database tidak dibuat ulang untuk setiap request.
 
+### Authentication
+
+Autentikasi JWT diterapkan menggunakan lifecycle hook `onRequest` pada level route plugin untuk seluruh endpoint yang membutuhkan autentikasi.
+
+Pendekatan ini dipilih agar token diverifikasi sedini mungkin dalam request lifecycle, sebelum proses parsing dan validasi request dijalankan. Dengan demikian, request tanpa token atau token tidak valid dapat langsung ditolak tanpa melanjutkan validasi payload, query, maupun params.
+
+Hook diterapkan pada level plugin agar seluruh endpoint dalam modul tersebut secara otomatis terlindungi tanpa perlu mendeklarasikan autentikasi secara berulang pada setiap route.
+
 ### Penanganan Error Terpusat
 
 Semua error ditangani secara terpusat melalui `errorHandlerPlugin` (`src/plugins/error-handler.ts`).

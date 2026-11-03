@@ -5,6 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "test": "vitest run",
+    "test:watch": "vitest",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts | pino-pretty",
