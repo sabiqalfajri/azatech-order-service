@@ -1,26 +1,48 @@
 # Technical Decisions
 
-Dokumen ini berisi beberapa keputusan teknis dan pertimbangan desain yang digunakan dalam pengembangan aplikasi Fullstack Order Service.
+Dokumen ini berisi keputusan teknis, pertimbangan desain, serta evaluasi implementasi aplikasi Fullstack Order Service.
 
-## 1. Monetary Value Representation
+## 1. Stock Concurrency & Transaction Integrity
 
-Nilai moneter disimpan menggunakan tipe integer dalam satuan Rupiah (IDR), karena aplikasi saat ini hanya mendukung transaksi Rupiah tanpa nilai pecahan. Pendekatan ini menghindari masalah presisi floating-point sekaligus menjaga perhitungan tetap sederhana.
+### Mencegah Stok Minus Saat Order Bersamaan
 
-Seluruh nilai yang berkaitan dengan transaksi, seperti harga produk, harga satuan, subtotal, diskon, dan total pesanan, menggunakan representasi integer dalam Rupiah.
+Pada fungsi `createOrder()` (`backend/src/modules/orders/service.ts`), seluruh proses pembuatan pesanan dijalankan dalam satu `db.transaction`.
 
-## 2. Stock Concurrency & Transaction Integrity
+Di awal transaksi, baris seluruh produk yang dipesan dikunci menggunakan `SELECT ... FOR UPDATE`. Jika transaksi lain mencoba mengunci produk yang sama, transaksi tersebut harus menunggu hingga transaksi pertama selesai (commit atau rollback), kemudian membaca kondisi stok terbaru.
 
-**Mencegah stok minus saat order bersamaan.** Di `createOrder` (`src/modules/orders/service.ts`), seluruh proses berjalan dalam satu `db.transaction`. Di awal transaksi, baris semua produk dalam order dikunci dengan `SELECT ... FOR UPDATE`. Order kedua untuk produk yang sama menunggu sampai order pertama commit atau rollback, lalu membaca stok terbaru, sehingga dua order tidak bisa "menjual" stok yang sama. Produk dikunci dalam urutan `id` yang tetap supaya dua transaksi dengan urutan produk berbeda tidak saling menunggu (deadlock).
+Produk dikunci berdasarkan urutan ID secara ascending untuk menjaga konsistensi urutan penguncian dan mengurangi risiko deadlock ketika beberapa transaksi membutuhkan produk yang sama.
 
-**Atomik dan tanpa perubahan sebagian.** Semua item divalidasi setelah baris dikunci dan sebelum ada data yang ditulis. Jika satu item gagal, error dilempar sebelum insert pertama, sehingga stok semua item tidak berubah. Jika ada kegagalan di tengah (misalnya insert), rollback membatalkan semuanya.
+### Atomicity dan Konsistensi Stok
 
-**Pembatalan.** `cancelOrder` memakai satu `UPDATE ... WHERE status IN ('PENDING','PAID')` dalam transaksi yang sama dengan pengembalian stok. Dua pembatalan bersamaan tidak bisa mengembalikan stok dua kali: yang kedua menunggu row lock, melihat status sudah `CANCELLED`, tidak mengenai baris, dan dijawab 409. `payOrder` memakai pola yang sama.
+Seluruh produk dan ketersediaan stok divalidasi setelah row terkunci dan sebelum proses penyimpanan dimulai.
 
-**Lapisan terakhir.** Constraint `products_stock_check` (`stock >= 0`) di database menolak stok minus walaupun ada bug di service. Test `stok tidak minus saat banyak order masuk bersamaan` (`orders.test.ts`) mengirim 8 order serentak untuk stok 3 dan memeriksa tepat 3 yang berhasil dan stok akhir 0.
+Jika satu item tidak valid atau stok tidak mencukupi, error dilempar sebelum perubahan data dilakukan. Jika terjadi kegagalan pada operasi database di tengah proses, seluruh perubahan dalam transaction akan di-rollback.
 
-**Status code.** Stok tidak cukup dijawab 409 karena merupakan konflik dengan kondisi data saat ini, sedangkan payload yang cacat (produk tidak ada, duplikat, quantity salah) dijawab 422. Keduanya tetap membawa `errors` per item.
+Dengan demikian, penyimpanan order, order items, dan pengurangan stok tidak dapat berhasil secara parsial.
 
-## 3. Project Structure & Architecture
+### Pembatalan dan Transisi Status
+
+Fungsi `cancelOrder()` menjalankan perubahan status menjadi `CANCELLED` dan pengembalian stok dalam satu database transaction.
+
+Perubahan status dilakukan secara kondisional, hanya untuk order berstatus `PENDING` atau `PAID`. Jika dua pembatalan dilakukan bersamaan, hanya satu yang berhasil mengubah status dan mengembalikan stok. Request berikutnya akan ditolak dengan HTTP 409 karena status order sudah `CANCELLED`.
+
+Fungsi `payOrder()` juga menggunakan conditional update agar perubahan status hanya dapat dilakukan dari `PENDING` menjadi `PAID`.
+
+### Database Constraint dan Pengujian
+
+Sebagai lapisan perlindungan tambahan, constraint `products_stock_check` pada tabel produk memastikan nilai stok tidak pernah kurang dari nol.
+
+Pengujian concurrency pada `orders.test.ts` mengirimkan delapan request pembuatan order secara bersamaan untuk produk dengan stok tiga. Hasil yang diharapkan adalah tepat tiga order berhasil, lima order ditolak, dan stok akhir tetap nol.
+
+### HTTP Status Code
+
+Stok tidak mencukupi menghasilkan HTTP 409 karena merupakan konflik dengan kondisi stok saat ini. Sementara itu, payload yang tidak valid, seperti produk tidak ditemukan, produk duplikat, atau quantity yang tidak valid, menghasilkan HTTP 422.
+
+Kedua jenis error tetap menyertakan detail `errors` agar frontend dapat menunjukkan masalah pada item yang bersangkutan.
+
+## 2. Project Structure & Architecture
+
+### Pendekatan Arsitektur
 
 Aplikasi menggunakan pendekatan Modular Monolith pada sisi backend, dengan pemisahan modul berdasarkan domain dan tanggung jawab masing-masing.
 
@@ -40,7 +62,7 @@ Backend menggunakan pemisahan tanggung jawab untuk menjaga agar setiap bagian me
 - **Controllers:** Menangani HTTP request dan response, serta meneruskan proses ke service.
 - **Services:** Menangani business logic dan aturan aplikasi tanpa bergantung langsung pada mekanisme penyusunan HTTP response.
 - **Database:** Menangani konfigurasi koneksi, schema, migration, dan akses data menggunakan Drizzle ORM.
-- **Common:** Menyediakan komponen lintas module seperti schema umum, custom error (`AppError`), dan helper.
+- **Common:** Menyediakan komponen lintas modul seperti schema umum, custom error (`AppError`), dan helper.
 - **Plugins:** Menangani integrasi dan konfigurasi plugin Fastify, termasuk database, JWT, autentikasi, dan error handler.
 
 ### Dependency Management
@@ -58,6 +80,7 @@ Pendekatan ini digunakan tanpa DI container tambahan karena kebutuhan aplikasi s
 Koneksi PostgreSQL dan instance Drizzle dibuat sebagai singleton pada modul database, kemudian didaftarkan ke Fastify melalui database plugin.
 
 Plugin bertanggung jawab untuk:
+
 - Mendaftarkan database instance melalui `app.decorate`.
 - Memeriksa koneksi database ketika aplikasi siap dijalankan.
 - Menutup koneksi ketika aplikasi melakukan shutdown.
@@ -74,18 +97,19 @@ Hook diterapkan pada level plugin agar seluruh endpoint dalam modul tersebut sec
 
 ### Penanganan Error Terpusat
 
-Semua error ditangani secara terpusat melalui `errorHandlerPlugin` (`src/plugins/error-handler.ts`).
+Semua error ditangani secara terpusat melalui `errorHandlerPlugin` (`backend/src/plugins/error-handler.ts`).
 
-Route dan service menggunakan `AppError` (`src/common/errors/app-error.ts`) untuk melempar error aplikasi yang sudah diketahui, termasuk HTTP status code dan field `errors` untuk detail validasi.
+Route dan service menggunakan `AppError` (`backend/src/common/errors/app-error.ts`) untuk melempar error aplikasi yang sudah diketahui, termasuk HTTP status code dan field `errors` untuk detail validasi.
 
 Error dari beberapa sumber diterjemahkan melalui handler khusus:
+
 - Zod validation error.
 - Fastify validation dan content type parser error.
 - Drizzle/PostgreSQL error.
 
 Response error mengikuti kontrak pada dokumen soal:
 
-\`\`\`json
+```json
 {
   "success": false,
   "message": "Validasi gagal",
@@ -95,36 +119,90 @@ Response error mengikuti kontrak pada dokumen soal:
     ]
   }
 }
-\`\`\`
+```
 
 Error yang tidak dikenali akan menghasilkan HTTP 500 dengan pesan umum, sedangkan detail error dicatat melalui logger.
 
-## 4. Database Design
+### Pengembangan Jika Aplikasi Membesar
+
+Jika kebutuhan aplikasi bertambah, pengembangan dapat dilakukan secara bertahap tanpa harus langsung memecah backend menjadi microservices.
+
+Beberapa hal yang dapat dikembangkan:
+
+- Memperjelas batas tanggung jawab dan dependency antar modul.
+- Menambahkan automated integration test untuk setiap modul dan alur transaksi.
+- Memisahkan proses background yang membutuhkan eksekusi asynchronous ke worker tersendiri.
+- Mempertimbangkan pemisahan service apabila terdapat kebutuhan scaling atau deployment independen yang memang membenarkannya.
+
+Pendekatan Modular Monolith dipilih agar kompleksitas infrastruktur tetap terkendali selama kebutuhan aplikasi masih dapat ditangani oleh satu backend.
+
+## 3. Known Issues & Bugs
+
+### [Nama bug atau masalah yang benar-benar ditemukan]
+
+**Masalah:**
+
+[Jelaskan perilaku yang salah atau tidak sesuai harapan.]
+
+**Cara menemukan:**
+
+[Jelaskan kondisi atau pengujian yang memunculkan bug.]
+
+**Penyebab:**
+
+[Jelaskan akar masalahnya.]
+
+**Perbaikan:**
+
+[Jelaskan perubahan yang dilakukan.]
+
+**Verifikasi:**
+
+[Jelaskan bagaimana memastikan bug sudah diperbaiki.]
+
+## 4. Limitations & Future Improvements
+
+Beberapa bagian yang belum diimplementasikan atau masih dapat dikembangkan lebih lanjut:
+
+- **Idempotency:** `Idempotency-Key` pada `POST /api/orders` belum diimplementasikan. Pengembangan selanjutnya dapat menambahkan mekanisme ini untuk mencegah transaksi ganda ketika client mengirim ulang request akibat timeout atau gangguan jaringan.
+- **Refresh Token:** Autentikasi saat ini menggunakan JWT access token tanpa mekanisme refresh token. Pengembangan selanjutnya dapat menambahkan refresh token dengan rotasi token untuk memperbarui access token tanpa mengharuskan pengguna login kembali.
+- **Rate Limiting:** Endpoint login belum dilengkapi rate limiting untuk membatasi percobaan login berulang.
+- **Database Testing:** Automated test masih menggunakan database yang sama dengan environment development. Ke depannya, database khusus testing dapat digunakan agar data pengujian terisolasi dari data development.
+- **Observability:** Monitoring dan observability masih dapat ditingkatkan, misalnya melalui structured logging, metrics, dan monitoring performa query.
+
+## 5. Additional Technical Decisions
+
+Bagian ini mencakup keputusan teknis tambahan yang tidak termasuk pertanyaan utama pada dokumen technical test.
+
+### Monetary Value Representation
+
+Nilai moneter disimpan menggunakan tipe integer dalam satuan Rupiah (IDR), karena aplikasi saat ini hanya mendukung transaksi Rupiah tanpa nilai pecahan. Pendekatan ini menghindari masalah presisi floating-point sekaligus menjaga perhitungan tetap sederhana.
+
+Seluruh nilai yang berkaitan dengan transaksi, seperti harga produk, harga satuan, subtotal, diskon, dan total pesanan, menggunakan representasi integer dalam Rupiah.
+
+### Database Design
 
 Database menggunakan PostgreSQL dengan Drizzle ORM.
 
 Beberapa pertimbangan desain:
+
 - `users` dan `customers` dipisahkan karena memiliki tanggung jawab berbeda. Users merepresentasikan akun internal yang dapat mengakses aplikasi, sedangkan customers merepresentasikan pelanggan yang melakukan pemesanan.
 - `orders` menyimpan informasi utama transaksi, termasuk status, subtotal, diskon, dan total akhir.
 - `order_items` menyimpan snapshot nama produk, kode produk, dan harga satuan ketika pesanan dibuat. Dengan demikian, perubahan informasi produk tidak mengubah histori transaksi yang sudah tercatat.
 - Satu produk hanya boleh muncul sekali dalam satu order. Aturan ini dijaga di dua lapisan:
-  1. **Validasi aplikasi**: `superRefine` pada schema Zod `createOrderSchema` (`src/modules/orders/schema.ts`) menolak item dengan `product_id` duplikat dan mengembalikan HTTP 422 dengan error pada `items.N.productId`, sehingga pesan error jelas dan sesuai indeks item di request.
-  2. **Constraint database**: unique constraint `order_items_order_product_uq` pada `(order_id, product_id)` di tabel `order_items`, sebagai jaring pengaman jika ada bug di service atau jalur lain yang menulis ke tabel ini.
-  
-  Alternatif menggabungkan item duplikat di service (misalnya produk A qty 2 dan qty 3 menjadi qty 5) tidak dipilih. Penggabungan memang membuat API lebih toleran, tetapi membuat pemetaan error menjadi ambigu. Contohnya, jika stok produk A tersisa 4 dan request berisi dua baris A dengan total 5, error stok tidak jelas harus ditempelkan ke baris yang mana. Solusinya adalah memilih salah satu baris (misalnya baris pertama) dan memberi pesan "gabungan 2 baris", tetapi itu menambah logika pemetaan yang harus dijaga, dan user melihat error pada baris yang jumlahnya sendiri sebenarnya tidak melebihi stok. Dengan menolak duplikat (422), setiap error selalu menunjuk tepat satu item di request, sesuai format error `items.N.quantity` pada soal.
-  
-  Sebagai gantinya, toleransi ditangani di sisi frontend dengan mencegah produk yang sama dipilih dua kali pada halaman Buat Order.
+  1. **Validasi aplikasi:** `superRefine` pada schema Zod `createOrderSchema` (`backend/src/modules/orders/schema.ts`) menolak item dengan `product_id` duplikat dan mengembalikan HTTP 422 dengan error pada `items.N.product_id`.
+  2. **Constraint database:** unique constraint `order_items_order_product_uq` pada `(order_id, product_id)` di tabel `order_items`, sebagai jaring pengaman jika ada bug di service atau jalur lain yang menulis ke tabel ini.
 
-## 5. Known Issues & Bugs
+Alternatif menggabungkan item duplikat di service tidak dipilih. Penggabungan dapat membuat pemetaan error stok menjadi ambigu karena beberapa baris request akan digabung menjadi satu jumlah. Dengan menolak duplikat, setiap error dapat menunjuk secara langsung ke item yang bermasalah.
 
-*Bagian ini akan dilengkapi setelah proses implementasi dan pengujian.*
+Sebagai gantinya, frontend mencegah produk yang sama dipilih dua kali pada halaman Buat Order.
 
-Akan mencakup bug yang ditemukan, penyebabnya, serta solusi yang diterapkan.
+### Order Number Generation
 
-## 6. Limitations & Future Improvements
+Nomor invoice dibuat menggunakan PostgreSQL sequence `order_number_seq`, yang didefinisikan pada schema orders dan digunakan oleh helper `generate-invoice.ts`.
 
-- Nomor order memakai sequence global tanpa reset harian, dan menjadi lebih dari 4 digit setelah 9999 order. Alternatif: counter per hari.
-- Idempotency-Key pada `POST /api/orders` belum diimplementasikan.
-- Produk duplikat dalam satu order ditolak, belum digabung.
-- Login tidak ada rate limiting dan waktu respons berbeda untuk email yang tidak terdaftar.
-- Test dijalankan terhadap database yang sama dengan development, belum ada database test terpisah.
+Sequence dipilih karena PostgreSQL menjamin setiap pemanggilan `nextval()` menghasilkan nilai yang berbeda, termasuk ketika beberapa order dibuat secara bersamaan.
+
+Nomor invoice menggunakan format `INV-YYYYMMDD-XXXX`, dengan tanggal berdasarkan WIB. Nilai sequence menggunakan `padStart(4, "0")`, sehingga empat digit merupakan panjang minimum dan nomor dapat bertambah jika sequence melewati 9.999.
+
+Sequence bersifat global, bukan di-reset setiap hari. Hal ini menghindari penggunaan ulang nomor sequence. Konsekuensinya, nomor dapat memiliki jeda karena sequence tidak di-rollback ketika database transaction gagal.
