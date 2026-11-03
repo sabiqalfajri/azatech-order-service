@@ -31,8 +31,8 @@ export function toOrderResponse(
     subtotal: o.subtotal,
     discount_amount: o.discountAmount,
     grand_total: o.grandTotal,
-    created_at: o.createdAt,
-    updated_at: o.updatedAt,
+    created_at: o.createdAt.toISOString(),
+    updated_at: o.updatedAt.toISOString(),
     customer: extra.customer,
     items: extra.items?.map((i) => ({
       id: i.id,

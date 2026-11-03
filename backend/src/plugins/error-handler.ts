@@ -41,6 +41,7 @@ function errorHandler(
     return reply.code(status).send(errorResponse(error.message));
   }
 
+  console.error("UNHANDLED:", error);
   request.log.error({ err: error }, "Unhandled error");
   return reply.code(500).send(errorResponse("Internal server error"));
 }

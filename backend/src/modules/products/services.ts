@@ -16,8 +16,8 @@ export function toProductResponse(p: ProductRow) {
     name: p.name,
     price: p.price,
     stock: p.stock,
-    created_at: p.createdAt,
-    updated_at: p.updatedAt,
+    created_at: p.createdAt.toISOString(),
+    updated_at: p.updatedAt.toISOString(),
   };
 }
 

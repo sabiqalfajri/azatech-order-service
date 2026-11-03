@@ -6,6 +6,7 @@ import { buildApp } from "../../app.js";
 import { customers } from "../../db/schema/customers.js";
 import { orders } from "../../db/schema/orders.js";
 import { products } from "../../db/schema/products.js";
+import { db } from "../../db/client.js";
 
 const LOGIN_URL = "/api/auth/login";
 const ADMIN = { email: "admin@example.com", password: "Admin123!" };
@@ -25,7 +26,7 @@ describe("Orders API", () => {
   const headers = () => ({ authorization: `Bearer ${accessToken}` });
 
   const makeProduct = async (stock: number, price = 100_000) => {
-    const [p] = await app.db
+    const [p] = await db
       .insert(products)
       .values({ productCode: `TST-${RUN}-${++seq}`, name: `Produk ${seq}`, price, stock })
       .returning();
@@ -34,7 +35,7 @@ describe("Orders API", () => {
   };
 
   const getStock = async (id: string) =>
-    (await app.db.select({ stock: products.stock }).from(products).where(eq(products.id, id)))[0]!.stock;
+    (await db.select({ stock: products.stock }).from(products).where(eq(products.id, id)))[0]!.stock;
 
   const placeOrder = async (items: Item[]) => {
     const res = await app.inject({
@@ -60,14 +61,14 @@ describe("Orders API", () => {
     expect(body.data.access_token).toBeTruthy();
     accessToken = body.data.access_token;
 
-    const [c] = await app.db.insert(customers).values({ name: `TST-${RUN}` }).returning();
+    const [c] = await db.insert(customers).values({ name: `TST-${RUN}` }).returning();
     customerId = c!.id;
   });
 
   afterAll(async () => {
-    if (orderIds.length) await app.db.delete(orders).where(inArray(orders.id, orderIds));
-    if (productIds.length) await app.db.delete(products).where(inArray(products.id, productIds));
-    await app.db.delete(customers).where(eq(customers.id, customerId));
+    await db.delete(orders).where(eq(orders.customerId, customerId));
+    if (productIds.length) await db.delete(products).where(inArray(products.id, productIds));
+    await db.delete(customers).where(eq(customers.id, customerId));
     await app.close();
   });
 
@@ -84,6 +85,9 @@ describe("Orders API", () => {
         items: [{ product_id: p.id, quantity: 2, unit_price: 1 }],
       },
     });
+    console.error("CREATE ORDER STATUS:", res.statusCode);
+    console.error("CREATE ORDER BODY:", res.body);
+
     expect(res.statusCode).toBe(201);
     orderIds.push(res.json().data.id);
 
@@ -182,7 +186,7 @@ describe("Orders API", () => {
     const p = await makeProduct(10, 100_000);
     const order = (await placeOrder([{ product_id: p.id, quantity: 5 }])).json().data;
 
-    await app.db.update(products).set({ price: 1 }).where(eq(products.id, p.id));
+    await db.update(products).set({ price: 1 }).where(eq(products.id, p.id));
 
     const res = await app.inject({ method: "GET", url: `/api/orders/${order.id}`, headers: headers() });
     expect(res.statusCode).toBe(200);

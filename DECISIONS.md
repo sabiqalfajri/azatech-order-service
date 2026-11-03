@@ -138,27 +138,37 @@ Pendekatan Modular Monolith dipilih agar kompleksitas infrastruktur tetap terken
 
 ## 3. Known Issues & Bugs
 
-### [Nama bug atau masalah yang benar-benar ditemukan]
+### Bug: Response Serialization Error pada Create Order
 
 **Masalah:**
 
-[Jelaskan perilaku yang salah atau tidak sesuai harapan.]
+Saat menjalankan automated integration test pada endpoint POST /api/orders, Vitest menerima HTTP 500 Internal Server Error. Sementara itu, ketika endpoint diuji melalui Postman, response menunjukkan bahwa customer tidak ditemukan. Hal ini awalnya membuat saya menganggap endpoint sudah berjalan sesuai ekspektasi.
 
 **Cara menemukan:**
 
-[Jelaskan kondisi atau pengujian yang memunculkan bug.]
+Saya melakukan beberapa langkah investigasi untuk mencari tahu penyebab perbedaan perilaku antara Postman dan Vitest:
+
+Menguji endpoint POST /api/orders melalui Postman dan mendapatkan response bahwa customer tidak ditemukan.
+
+Memeriksa apakah Vitest menggunakan database yang sama dengan Postman melalui query SQL.
+
+Menambahkan logging pada order service untuk memeriksa proses eksekusi, tetapi belum berhasil menemukan penyebabnya.
+
+Menambahkan console.error("UNHANDLED:", error) pada global error handler plugin agar detail error yang tidak tertangani dapat terlihat.
+
+Dari logging tersebut, akhirnya ditemukan error FST_ERR_RESPONSE_SERIALIZATION dengan detail bahwa response tidak sesuai dengan schema yang didefinisikan.
 
 **Penyebab:**
 
-[Jelaskan akar masalahnya.]
+Fungsi toOrderResponse() mengembalikan objek JavaScript Date untuk field created_at dan updated_at, sedangkan response schema menggunakan z.iso.datetime() yang mengharapkan string ISO datetime.
 
 **Perbaikan:**
 
-[Jelaskan perubahan yang dilakukan.]
+Mengubah field created_at dan updated_at pada toOrderResponse() menggunakan .toISOString() agar tipe data yang dikembalikan sesuai dengan response schema.
 
 **Verifikasi:**
 
-[Jelaskan bagaimana memastikan bug sudah diperbaiki.]
+Menjalankan kembali automated integration test pada Orders API. Setelah perbaikan, seluruh 15 test berhasil dilewati tanpa response serialization error.
 
 ## 4. Limitations & Future Improvements
 

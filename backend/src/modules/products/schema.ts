@@ -23,8 +23,8 @@ export const productSchema = z.object({
   name: z.string(),
   price: z.number().int(),
   stock: z.number().int(),
-  created_at: z.date(),
-  updated_at: z.date(),
+  created_at: z.iso.datetime(),
+  updated_at: z.iso.datetime(),
 })
 
 export type GetProductsQuery = z.infer<typeof getProductsQuerySchema>
