@@ -270,16 +270,16 @@ Endpoint `PATCH /api/orders/:id/cancel` menangani pembatalan order.
 
 ## Pengujian
 
-Prasyarat: PostgreSQL sudah berjalan, database sudah di-migrate, dan sudah di-seed (lihat bagian Menjalankan Aplikasi).
+Prasyarat: PostgreSQL sudah berjalan (`docker compose up -d --wait`), dan `npm run setup` sudah dijalankan dari folder `backend` (lihat bagian Menjalankan Aplikasi) sehingga database sudah di-migrate dan di-seed.
 
 Automated test menggunakan Vitest dan Fastify `app.inject()`. Test login menggunakan akun admin dari seeder.
 
 Test menggunakan database development yang sama dan membuat data dengan identifier unik. Data yang dibuat selama pengujian dibersihkan setelah test selesai.
 
-Jalankan dari root repository:
+Jalankan dari folder `backend`:
 
 ```bash
-npm --prefix backend test
+npm run test
 ```
 
 ### Cakupan Test
