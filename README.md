@@ -15,9 +15,11 @@ Aplikasi ini menyediakan pengelolaan produk, pelanggan, dan pesanan, termasuk pr
 - JWT Authentication
 
 ### Frontend
-- Next.js
-- React
-- TypeScript
+- Next.js (App Router), React, dan TypeScript
+- Tailwind CSS dan shadcn/ui
+- TanStack Query (pengambilan dan cache data server)
+- React Hook Form dan Zod (form dan validasi)
+- Route handler Next.js sebagai BFF untuk autentikasi (JWT disimpan di cookie httpOnly)
 
 ### Infrastructure & Testing
 - Docker & Docker Compose
