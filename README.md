@@ -58,65 +58,38 @@ Pastikan perangkat sudah memiliki:
 
 ## Menjalankan Aplikasi
 
-### 1. Clone Repository
+Setup dari clone sampai database dan dependency siap hanya membutuhkan 6 perintah. Menjalankan backend dan frontend ada di langkah terakhir.
+
+Di Windows, `cp` tersedia di PowerShell. Di Command Prompt, gunakan `copy`.
 
 ```bash
 git clone https://github.com/sabiqalfajri/azatech-order-service.git
 cd azatech-order-service
-```
-
-### 2. Konfigurasi Environment
-
-Salin file environment untuk backend:
-
-```bash
 cp backend/.env.example backend/.env
+docker compose up -d --wait
+cd backend
+npm run setup
 ```
 
-Sesuaikan konfigurasi `DATABASE_URL` dengan konfigurasi PostgreSQL pada `docker-compose.yaml`.
+Penjelasan:
 
-### 3. Jalankan PostgreSQL
+- `cp backend/.env.example backend/.env` menyalin konfigurasi environment. Nilai bawaannya sudah sesuai dengan `docker-compose.yaml`. Ubah `DATABASE_URL` hanya jika konfigurasi PostgreSQL diubah.
+- `docker compose up -d --wait` menjalankan PostgreSQL dan menunggu sampai statusnya `healthy`. Docker Compose hanya digunakan untuk PostgreSQL, sedangkan backend dan frontend dijalankan secara lokal.
+- `npm run setup` (dijalankan dari folder `backend`) memasang dependency backend (`npm ci`), menjalankan migration, mengisi data awal, lalu memasang dependency frontend. Script ini aman dijalankan ulang.
 
-Jalankan dari root repository:
+### Menjalankan Backend dan Frontend
+
+Terminal 1, dari folder `backend`:
 
 ```bash
-docker compose up -d
+npm run dev
 ```
 
-Docker Compose hanya digunakan untuk menjalankan PostgreSQL. Backend dan frontend dijalankan secara lokal.
-
-### 4. Install Dependencies
-
-Jalankan dari root repository:
+Terminal 2, dari root repository:
 
 ```bash
-npm --prefix backend install
-npm --prefix frontend install
-```
-
-### 5. Inisialisasi Database
-
-Jalankan dari root repository:
-
-```bash
-npm --prefix backend run db:migrate
-npm --prefix backend run db:seed
-```
-
-Proses ini menjalankan database migration dan menyediakan data awal untuk pengujian.
-
-### 6. Jalankan Backend dan Frontend
-
-Jalankan backend dari root repository:
-
-```bash
-npm --prefix backend run dev
-```
-
-Jalankan frontend dari terminal terpisah, juga dari root repository:
-
-```bash
-npm --prefix frontend run dev
+cd frontend
+npm run dev
 ```
 
 ## Akses Aplikasi
